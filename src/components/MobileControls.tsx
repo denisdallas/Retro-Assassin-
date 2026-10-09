@@ -1,18 +1,25 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { GadgetType, GadgetItem } from '../types/game';
-import { Cloud, Radio, Zap, EyeOff, Sword } from 'lucide-react';
+import { Cloud, Bomb, Zap, EyeOff, Sword, CheckCircle2 } from 'lucide-react';
+import { sound } from '../audio/soundEngine';
 
 interface MobileControlsProps {
   onMove: (dx: number, dy: number) => void;
+  selectedGadget: GadgetType;
+  onSelectGadget: (type: GadgetType) => void;
   onUseGadget: (type: GadgetType) => void;
   gadgets: Record<GadgetType, GadgetItem>;
+  hasArmedMine: boolean;
   onManualSlash?: () => void;
 }
 
 export const MobileControls: React.FC<MobileControlsProps> = ({
   onMove,
+  selectedGadget,
+  onSelectGadget,
   onUseGadget,
   gadgets,
+  hasArmedMine,
   onManualSlash,
 }) => {
   const joystickBaseRef = useRef<HTMLDivElement | null>(null);
@@ -85,11 +92,24 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
         keys[k] = true;
         updateKeyboardVector();
       }
-      // Gadget hotkeys: 1, 2, 3, 4
-      if (k === '1') onUseGadget('smoke');
-      if (k === '2') onUseGadget('decoy');
-      if (k === '3') onUseGadget('emp');
-      if (k === '4') onUseGadget('camo');
+      // Gadget Selection hotkeys: 1, 2, 3, 4
+      if (k === '1') {
+        onSelectGadget('smoke');
+      }
+      if (k === '2') {
+        onSelectGadget('mine');
+      }
+      if (k === '3') {
+        onSelectGadget('emp');
+      }
+      if (k === '4') {
+        onSelectGadget('camo');
+      }
+      // Use active gadget: E or Q
+      if (k === 'e' || k === 'q') {
+        onUseGadget(selectedGadget);
+      }
+      // Strike: Space
       if (k === ' ') {
         e.preventDefault();
         onManualSlash?.();
@@ -120,19 +140,24 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [onMove, onUseGadget, onManualSlash]);
+  }, [onMove, onSelectGadget, onUseGadget, selectedGadget, onManualSlash]);
 
-  const gadgetIcons = {
-    smoke: <Cloud className="w-5 h-5 text-slate-300" />,
-    decoy: <Radio className="w-5 h-5 text-cyan-400" />,
-    emp: <Zap className="w-5 h-5 text-sky-400" />,
-    camo: <EyeOff className="w-5 h-5 text-purple-400" />,
+  const gadgetIcons: Record<GadgetType, React.ReactNode> = {
+    smoke: <Cloud className="w-5 h-5" />,
+    mine: <Bomb className="w-5 h-5" />,
+    emp: <Zap className="w-5 h-5" />,
+    camo: <EyeOff className="w-5 h-5" />,
   };
 
+  const currentGadget = gadgets[selectedGadget];
+  const isMineDetonateMode = selectedGadget === 'mine' && hasArmedMine;
+  const isGadgetDisabled = !isMineDetonateMode && (currentGadget.charges <= 0 || currentGadget.currentCooldown > 0);
+
   return (
-    <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-end p-4 pb-6">
-      <div className="w-full flex items-end justify-between">
-        {/* Left Touch Joystick */}
+    <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-end p-4 pb-5">
+      {/* Bottom Control Bar */}
+      <div className="w-full flex items-end justify-between gap-2">
+        {/* Left Thumb: Virtual Touch Joystick */}
         <div
           ref={joystickBaseRef}
           onTouchStart={handleTouchStart}
@@ -156,44 +181,51 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
           </div>
         </div>
 
-        {/* Right Action Hotbar: Gadgets + Strike Button */}
-        <div className="pointer-events-auto flex items-end gap-3">
-          {/* Gadget Grid */}
-          <div className="grid grid-cols-2 gap-2">
-            {(['smoke', 'decoy', 'emp', 'camo'] as GadgetType[]).map((type, idx) => {
+        {/* Right Thumb: Dedicated Gadget Selection Tray + Deploy & Strike Buttons */}
+        <div className="pointer-events-auto flex flex-col items-end gap-2.5">
+          {/* Dedicated Gadget Selector Tray */}
+          <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-gray-950/80 border border-gray-800/80 backdrop-blur-md shadow-xl">
+            {(['smoke', 'mine', 'emp', 'camo'] as GadgetType[]).map((type, idx) => {
               const g = gadgets[type];
-              const disabled = g.charges <= 0 || g.currentCooldown > 0;
-              const cooldownPct = g.currentCooldown > 0 ? (g.currentCooldown / g.cooldown) * 100 : 0;
+              const isSelected = selectedGadget === type;
+              const hasMineArmed = type === 'mine' && hasArmedMine;
+              const hasNoCharges = g.charges <= 0 && !hasMineArmed;
 
               return (
                 <button
                   key={type}
-                  onClick={() => onUseGadget(type)}
-                  disabled={disabled}
-                  className={`relative w-14 h-14 rounded-xl flex flex-col items-center justify-center border transition-all active:scale-95 touch-manipulation ${
-                    disabled
-                      ? 'bg-gray-900/80 border-gray-800 text-gray-500 opacity-60'
-                      : 'bg-gray-900/90 border-cyan-500/40 hover:border-cyan-400 text-white shadow-lg shadow-cyan-950/50 active:bg-cyan-950/60'
+                  onClick={() => {
+                    sound.playUiClick();
+                    onSelectGadget(type);
+                  }}
+                  className={`relative w-12 h-12 rounded-xl flex flex-col items-center justify-center border transition-all active:scale-95 touch-manipulation ${
+                    isSelected
+                      ? hasMineArmed
+                        ? 'bg-rose-950/90 border-rose-400 text-rose-300 ring-2 ring-rose-400/80 shadow-lg shadow-rose-950/60 scale-105'
+                        : 'bg-cyan-950/90 border-cyan-400 text-cyan-300 ring-2 ring-cyan-400/80 shadow-lg shadow-cyan-950/60 scale-105'
+                      : hasNoCharges
+                      ? 'bg-gray-900/60 border-gray-800 text-gray-600 opacity-60'
+                      : 'bg-gray-900/90 border-gray-700/80 text-gray-300 hover:text-white hover:border-gray-500'
                   }`}
-                  aria-label={`Use ${g.name}`}
+                  aria-label={`Select ${g.name}`}
                 >
-                  {/* Cooldown Overlay */}
-                  {g.currentCooldown > 0 && (
-                    <div
-                      style={{ height: `${cooldownPct}%` }}
-                      className="absolute bottom-0 left-0 right-0 bg-red-950/60 rounded-b-xl pointer-events-none"
-                    />
+                  {/* Selected Indicator Checkmark */}
+                  {isSelected && (
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-cyan-400 text-gray-950 flex items-center justify-center shadow">
+                      <CheckCircle2 className="w-3 h-3" />
+                    </span>
                   )}
 
+                  {/* Icon */}
                   {gadgetIcons[type]}
 
-                  {/* Charge Counter */}
-                  <span className="absolute bottom-1 right-1.5 text-[10px] font-mono font-bold text-cyan-300">
-                    {g.charges}
+                  {/* Charge / Armed Counter */}
+                  <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold">
+                    {hasMineArmed ? '💣' : g.charges}
                   </span>
 
-                  {/* Hotkey tag for desktop */}
-                  <span className="absolute top-1 left-1.5 text-[9px] font-mono text-gray-400">
+                  {/* Hotkey Tag */}
+                  <span className="absolute top-0.5 left-1 text-[8px] font-mono text-gray-500">
                     {idx + 1}
                   </span>
                 </button>
@@ -201,15 +233,48 @@ export const MobileControls: React.FC<MobileControlsProps> = ({
             })}
           </div>
 
-          {/* Big Melee Strike Button */}
-          <button
-            onClick={onManualSlash}
-            className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-500 border-2 border-white/60 shadow-lg shadow-rose-900/60 flex flex-col items-center justify-center text-white active:scale-90 transition-all touch-manipulation"
-            aria-label="Strike / Attack"
-          >
-            <Sword className="w-7 h-7" />
-            <span className="text-[9px] font-mono font-bold tracking-wider uppercase mt-0.5">STRIKE</span>
-          </button>
+          {/* Action Trigger Row: Selected Gadget Use Button + Melee Strike Button */}
+          <div className="flex items-center gap-2.5">
+            {/* Deploy / Detonate Gadget Button */}
+            <button
+              onClick={() => onUseGadget(selectedGadget)}
+              disabled={isGadgetDisabled}
+              className={`h-15 px-4 rounded-2xl flex items-center justify-center gap-2 border-2 transition-all active:scale-95 shadow-xl font-mono text-xs font-bold uppercase tracking-wider touch-manipulation ${
+                isMineDetonateMode
+                  ? 'bg-gradient-to-r from-red-600 to-rose-600 border-white text-white shadow-rose-950/80 animate-pulse'
+                  : isGadgetDisabled
+                  ? 'bg-gray-900/80 border-gray-800 text-gray-600 cursor-not-allowed opacity-60'
+                  : 'bg-gradient-to-r from-cyan-600 via-sky-500 to-blue-600 border-cyan-300/60 text-white shadow-cyan-950/60 hover:from-cyan-500 hover:to-blue-500'
+              }`}
+              aria-label="Use Selected Gadget"
+            >
+              {gadgetIcons[selectedGadget]}
+              <div className="flex flex-col items-start leading-tight">
+                <span>
+                  {isMineDetonateMode
+                    ? 'DETONATE MINE!'
+                    : selectedGadget === 'mine'
+                    ? 'PLANT MINE'
+                    : selectedGadget === 'smoke'
+                    ? 'THROW SMOKE'
+                    : `USE ${currentGadget.name}`}
+                </span>
+                <span className="text-[9px] text-white/70 font-normal">
+                  {isMineDetonateMode ? 'BLAST RADIUS 140PX' : `${currentGadget.charges} CHARGES [E]`}
+                </span>
+              </div>
+            </button>
+
+            {/* Big Melee Strike Button */}
+            <button
+              onClick={onManualSlash}
+              className="w-16 h-15 rounded-2xl bg-gradient-to-tr from-rose-600 to-pink-500 border-2 border-white/60 shadow-lg shadow-rose-900/60 flex flex-col items-center justify-center text-white active:scale-90 transition-all touch-manipulation"
+              aria-label="Strike / Attack"
+            >
+              <Sword className="w-6 h-6" />
+              <span className="text-[9px] font-mono font-bold tracking-wider uppercase mt-0.5">STRIKE</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import { generateEndlessSector } from './game/endlessGenerator';
 import {
   createInitialEngineState,
   GameEngineState,
+  selectGadget,
   updateEngine,
   useGadget,
 } from './game/engine';
@@ -22,6 +23,7 @@ import { ShopModal } from './components/ShopModal';
 import { VictoryModal } from './components/VictoryModal';
 import { GameOverModal } from './components/GameOverModal';
 import { PauseModal } from './components/PauseModal';
+import { EndlessModeModal } from './components/EndlessModeModal';
 import { sound } from './audio/soundEngine';
 
 const STORAGE_KEY = 'CYBER_SHADOW_STATE_V1';
@@ -44,6 +46,8 @@ const defaultStats: PlayerStats = {
     endlessBestSector: 0,
     endlessBestKills: 0,
     highestCombo: 0,
+    endlessHighScore: 0,
+    endlessBestDuration: 0,
   },
 };
 
@@ -75,6 +79,7 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'menu' | 'playing'>('menu');
   const [showLevelSelect, setShowLevelSelect] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [showEndlessModal, setShowEndlessModal] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
   // Game Engine State
@@ -107,7 +112,7 @@ export default function App() {
       setEndlessSector(sector);
       inputVector.current = { dx: 0, dy: 0 };
       tapMoveTarget.current = null;
-      setEngineState(createInitialEngineState(lvl, stats));
+      setEngineState(createInitialEngineState(lvl, stats, endless));
       setIsPaused(false);
       setCurrentScreen('playing');
     },
@@ -122,6 +127,12 @@ export default function App() {
 
   // Start Endless Mode
   const handleStartEndless = () => {
+    setShowEndlessModal(true);
+  };
+
+  // Launch Endless Run from Modal
+  const handleLaunchEndlessRun = () => {
+    setShowEndlessModal(false);
     const sector1 = generateEndlessSector(1);
     startLevel(sector1, true, 1);
   };
@@ -159,6 +170,19 @@ export default function App() {
       }
 
       if (engineState.isGameOver) {
+        // Save endless record on game over
+        if (engineState.isEndless) {
+          setStats((prev) => ({
+            ...prev,
+            highScores: {
+              ...prev.highScores,
+              endlessHighScore: Math.max(prev.highScores.endlessHighScore || 0, engineState.score),
+              endlessBestDuration: Math.max(prev.highScores.endlessBestDuration || 0, engineState.survivalDuration),
+              endlessBestKills: Math.max(prev.highScores.endlessBestKills || 0, engineState.kills),
+              endlessBestSector: Math.max(prev.highScores.endlessBestSector || 0, endlessSector),
+            },
+          }));
+        }
         return;
       }
 
@@ -170,7 +194,7 @@ export default function App() {
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [currentScreen, engineState, isPaused, stats]);
+  }, [currentScreen, engineState, isPaused, stats, endlessSector]);
 
   // Victory Settlement logic
   const handleVictorySettlement = (state: GameEngineState) => {
@@ -207,6 +231,14 @@ export default function App() {
           nextHighScores.endlessBestKills,
           state.kills
         );
+        nextHighScores.endlessHighScore = Math.max(
+          nextHighScores.endlessHighScore || 0,
+          state.score
+        );
+        nextHighScores.endlessBestDuration = Math.max(
+          nextHighScores.endlessBestDuration || 0,
+          state.survivalDuration
+        );
       }
       nextHighScores.highestCombo = Math.max(
         nextHighScores.highestCombo,
@@ -239,7 +271,14 @@ export default function App() {
   // Gadget Trigger
   const handleUseGadget = (type: GadgetType) => {
     if (engineState) {
-      useGadget(engineState, type);
+      useGadget(engineState, type, stats);
+    }
+  };
+
+  // Gadget Selection
+  const handleSelectGadget = (type: GadgetType) => {
+    if (engineState) {
+      selectGadget(engineState, type);
     }
   };
 
@@ -320,11 +359,14 @@ export default function App() {
             onTapMove={handleTapMove}
           />
 
-          {/* Android Mobile Controls (Joystick & Gadget Hotbar) */}
+          {/* Android Mobile Controls (Joystick, Gadget Selection Bar & Detonator) */}
           <MobileControls
             onMove={handleJoystickMove}
+            selectedGadget={engineState.selectedGadget}
+            onSelectGadget={handleSelectGadget}
             onUseGadget={handleUseGadget}
             gadgets={engineState.gadgets}
+            hasArmedMine={engineState.mines.length > 0}
             onManualSlash={handleManualSlash}
           />
 
@@ -364,6 +406,14 @@ export default function App() {
       )}
 
       {/* OVERLAY MODALS (FROM MAIN MENU) */}
+      {showEndlessModal && (
+        <EndlessModeModal
+          stats={stats}
+          onLaunch={handleLaunchEndlessRun}
+          onClose={() => setShowEndlessModal(false)}
+        />
+      )}
+
       {showLevelSelect && (
         <LevelSelectModal
           stats={stats}

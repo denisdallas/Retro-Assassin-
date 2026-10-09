@@ -1,6 +1,7 @@
 import {
   BossEntity,
   DecoyEntity,
+  EnvironmentalSwitch,
   FloatingText,
   GadgetItem,
   GadgetType,
@@ -11,6 +12,7 @@ import {
   Particle,
   PlayerStats,
   Point,
+  RemoteMine,
   SmokeCloud,
   Terminal,
   Wall,
@@ -34,27 +36,34 @@ export interface GameEngineState {
   guards: Guard[];
   boss: BossEntity | null;
   lasers: LaserTrap[];
+  switches: EnvironmentalSwitch[];
   terminals: Terminal[];
   vents: HiddenVent[];
   walls: Wall[];
   smokeClouds: SmokeCloud[];
   decoys: DecoyEntity[];
+  mines: RemoteMine[];
   particles: Particle[];
   floatingTexts: FloatingText[];
   gadgets: Record<GadgetType, GadgetItem>;
+  selectedGadget: GadgetType;
   combo: number;
   comboTimer: number;
   maxCombo: number;
   timeElapsed: number;
+  survivalDuration: number;
   alertsTriggered: number;
   kills: number;
   creditsEarned: number;
+  score: number;
   isGameOver: boolean;
   isVictory: boolean;
+  isEndless: boolean;
   gameStatusText: string;
   interactingTerminal: Terminal | null;
   terminalHackProgress: number;
   lastHaptic: number;
+  lastSwitchToggle: number;
 }
 
 // Line intersection helper
@@ -110,7 +119,11 @@ export function hasLineOfSight(p1: Point, p2: Point, walls: Wall[]): boolean {
   return true;
 }
 
-export function createInitialEngineState(level: LevelData, stats: PlayerStats): GameEngineState {
+export function createInitialEngineState(
+  level: LevelData,
+  stats: PlayerStats,
+  isEndless: boolean = false
+): GameEngineState {
   const skin = SKINS.find((s) => s.id === stats.equippedSkin) || SKINS[0];
   const speedPerkMult = 1 + (stats.perks.speedLevel - 1) * 0.1;
   const baseSpeed = 3.6 * (1 + skin.speedBonus) * speedPerkMult;
@@ -138,6 +151,9 @@ export function createInitialEngineState(level: LevelData, stats: PlayerStats): 
   // Deep clone lasers
   const lasers: LaserTrap[] = level.lasers.map((l) => ({ ...l }));
 
+  // Deep clone environmental switches
+  const switches: EnvironmentalSwitch[] = (level.switches || []).map((s) => ({ ...s }));
+
   // Deep clone terminals
   const terminals: Terminal[] = level.terminals.map((t) => ({ ...t, hacked: false }));
 
@@ -160,32 +176,35 @@ export function createInitialEngineState(level: LevelData, stats: PlayerStats): 
     guards,
     boss,
     lasers,
+    switches,
     terminals,
     vents,
     walls: level.walls,
     smokeClouds: [],
     decoys: [],
+    mines: [],
     particles: [],
     floatingTexts: [],
+    selectedGadget: 'smoke',
     gadgets: {
       smoke: {
         type: 'smoke',
         name: 'Smoke Bomb',
-        description: 'Blocks all guard vision',
+        description: 'Blinds guards & blocks vision',
         icon: 'Cloud',
         charges: 2 + gadgetBonus,
         maxCharges: 2 + gadgetBonus,
         cooldown: 8,
         currentCooldown: 0,
       },
-      decoy: {
-        type: 'decoy',
-        name: 'Holo-Decoy',
-        description: 'Lures guards to investigate',
-        icon: 'Radio',
+      mine: {
+        type: 'mine',
+        name: 'Remote Mine',
+        description: 'Deploy & detonate to eliminate',
+        icon: 'Bomb',
         charges: 2 + gadgetBonus,
         maxCharges: 2 + gadgetBonus,
-        cooldown: 10,
+        cooldown: 8,
         currentCooldown: 0,
       },
       emp: {
@@ -213,15 +232,19 @@ export function createInitialEngineState(level: LevelData, stats: PlayerStats): 
     comboTimer: 0,
     maxCombo: 0,
     timeElapsed: 0,
+    survivalDuration: 0,
     alertsTriggered: 0,
     kills: 0,
     creditsEarned: 0,
+    score: 0,
     isGameOver: false,
     isVictory: false,
+    isEndless,
     gameStatusText: '',
     interactingTerminal: null,
     terminalHackProgress: 0,
     lastHaptic: 0,
+    lastSwitchToggle: 0,
   };
 }
 
@@ -234,6 +257,10 @@ export function updateEngine(
   if (state.isGameOver || state.isVictory) return;
 
   state.timeElapsed += dt;
+  if (state.isEndless) {
+    state.survivalDuration += dt;
+    state.score = state.kills * 100 + Math.floor(state.survivalDuration * 10) + state.creditsEarned;
+  }
 
   const skin = SKINS.find((s) => s.id === stats.equippedSkin) || SKINS[0];
   const reachPerkMult = 1 + (stats.perks.reachLevel - 1) * 0.12;
@@ -377,7 +404,7 @@ export function updateEngine(
     }
   }
 
-  // 7. Update Decoys
+  // 7. Update Decoys and Mines
   for (let i = state.decoys.length - 1; i >= 0; i--) {
     const decoy = state.decoys[i];
     decoy.remaining -= dt;
@@ -390,6 +417,68 @@ export function updateEngine(
       state.decoys.splice(i, 1);
     }
   }
+
+  // Remote Mines pulsing
+  state.mines.forEach((mine) => {
+    mine.pulseTimer += dt;
+    if (mine.pulseTimer >= 0.9) {
+      mine.pulseTimer = 0;
+      sound.playMineBeep();
+    }
+  });
+
+  // Environmental Switches
+  state.switches.forEach((sw) => {
+    const pDist = Math.sqrt(distSq(state.player, sw));
+    if (pDist < sw.radius + state.player.radius + 10 && Date.now() - state.lastSwitchToggle > 1000) {
+      state.lastSwitchToggle = Date.now();
+      sw.isOn = !sw.isOn;
+      sound.playSwitchToggle();
+      triggerHaptic([30, 25]);
+      const targetLaser = state.lasers.find((l) => l.id === sw.targetLaserId);
+      if (targetLaser) {
+        targetLaser.active = sw.isOn;
+        if (!sw.isOn) {
+          targetLaser.timer = targetLaser.cycleTime;
+        }
+      }
+      state.floatingTexts.push({
+        id: `sw-${Date.now()}`,
+        x: sw.x,
+        y: sw.y - 30,
+        text: sw.isOn ? 'SECURITY LASER ARMED' : 'SECURITY LASER DISABLED',
+        color: sw.isOn ? '#ef4444' : '#10b981',
+        alpha: 1.0,
+        life: 1.5,
+      });
+    }
+
+    // Guard interaction with switch
+    if (sw.controllableByGuard && !sw.isOn) {
+      state.guards.forEach((g) => {
+        if (g.state !== 'dead') {
+          const gDist = Math.sqrt(distSq(g, sw));
+          if (gDist < sw.radius + g.radius + 8) {
+            sw.isOn = true;
+            sound.playAlertBuzzer();
+            const targetLaser = state.lasers.find((l) => l.id === sw.targetLaserId);
+            if (targetLaser) {
+              targetLaser.active = true;
+            }
+            state.floatingTexts.push({
+              id: `guard-sw-${Date.now()}`,
+              x: sw.x,
+              y: sw.y - 30,
+              text: 'GUARD RE-ARMED LASER!',
+              color: '#f59e0b',
+              alpha: 1.0,
+              life: 1.8,
+            });
+          }
+        }
+      });
+    }
+  });
 
   // 8. Update Laser Traps
   state.lasers.forEach((laser) => {
@@ -699,6 +788,15 @@ export function updateEngine(
     }
 
     if (playerSpotted) {
+      if (state.isEndless) {
+        guard.state = 'alert';
+        state.alertsTriggered++;
+        sound.playAlertBuzzer();
+        sound.playGunshot();
+        triggerDefeat(state, 'DETECTED: In Endless Mode, stealth compromise results in immediate extraction failure.');
+        return;
+      }
+
       // Guard is spotting player!
       guard.targetRotation = Math.atan2(state.player.y - guard.y, state.player.x - guard.x);
       guard.rotation = rotateTowards(guard.rotation, guard.targetRotation, 10 * dt);
@@ -847,8 +945,96 @@ export function updateEngine(
   }
 }
 
+export function selectGadget(state: GameEngineState, type: GadgetType) {
+  state.selectedGadget = type;
+  sound.playUiClick();
+}
+
 // Gadget Execution
-export function useGadget(state: GameEngineState, type: GadgetType) {
+export function useGadget(state: GameEngineState, type: GadgetType, stats?: PlayerStats) {
+  // If remote mine is already armed on the floor, detonating it doesn't require another charge!
+  if (type === 'mine' && state.mines.length > 0) {
+    sound.playExplosion();
+    triggerHaptic([60, 40, 80]);
+
+    let killsFromBlast = 0;
+    const currentStats = stats || ({ equippedSkin: 'default', perks: { speedLevel: 1, reachLevel: 1, stealthLevel: 1, gadgetLevel: 1 } } as unknown as PlayerStats);
+    const skin = SKINS.find((s) => s.id === currentStats.equippedSkin) || SKINS[0];
+    const creditMultiplier = skin.id === 'gold' ? 1.5 : 1.0;
+
+    state.mines.forEach((mine) => {
+      spawnExplosionParticles(state, mine.x, mine.y, mine.radius);
+
+      // Check all enemies in blast radius
+      const allEnemies: Guard[] = [...state.guards];
+      if (state.boss && state.boss.state !== 'dead') allEnemies.push(state.boss);
+
+      allEnemies.forEach((enemy) => {
+        if (enemy.state === 'dead') return;
+        const d = Math.sqrt(distSq(enemy, mine));
+        if (d <= mine.radius) {
+          if (enemy.type === 'boss') {
+            const boss = state.boss!;
+            if (boss.shieldActive) {
+              boss.shieldActive = false;
+              state.floatingTexts.push({
+                id: `mine-boss-shield-${Date.now()}`,
+                x: boss.x,
+                y: boss.y - 40,
+                text: 'SHIELD OVERLOADED BY MINE BLAST!',
+                color: '#00f0ff',
+                alpha: 1.0,
+                life: 2.0,
+              });
+            } else {
+              boss.health--;
+              if (boss.health <= 0) {
+                boss.state = 'dead';
+                state.kills++;
+                sound.playBossAlarm();
+              }
+            }
+          } else {
+            enemy.state = 'dead';
+            state.kills++;
+            killsFromBlast++;
+            state.combo++;
+            state.comboTimer = 4.0;
+            state.player.adrenalineTimer = 1.4;
+            const earned = Math.round(70 * (state.combo > 1 ? 1 + state.combo * 0.25 : 1) * creditMultiplier);
+            state.creditsEarned += earned;
+          }
+        }
+      });
+
+      // Temporarily disrupt lasers in blast
+      state.lasers.forEach((laser) => {
+        const d1 = Math.sqrt(distSq({ x: laser.x1, y: laser.y1 }, mine));
+        const d2 = Math.sqrt(distSq({ x: laser.x2, y: laser.y2 }, mine));
+        if (d1 < mine.radius || d2 < mine.radius) {
+          laser.active = false;
+          laser.timer = laser.cycleTime - 4.0;
+        }
+      });
+    });
+
+    state.mines = [];
+    state.floatingTexts.push({
+      id: `mine-blast-${Date.now()}`,
+      x: state.player.x,
+      y: state.player.y - 35,
+      text: killsFromBlast > 0 ? `REMOTE DETONATION: ${killsFromBlast} PURGED!` : 'REMOTE MINE DETONATED',
+      color: '#f43f5e',
+      alpha: 1.0,
+      life: 1.8,
+    });
+
+    if (stats) {
+      checkVictory(state, stats);
+    }
+    return true;
+  }
+
   const gadget = state.gadgets[type];
   if (!gadget || gadget.charges <= 0 || gadget.currentCooldown > 0 || state.isGameOver || state.isVictory) {
     return false;
@@ -864,7 +1050,7 @@ export function useGadget(state: GameEngineState, type: GadgetType) {
       x: state.player.x,
       y: state.player.y,
       radius: 20,
-      maxRadius: 130,
+      maxRadius: 135,
       duration: 6.5,
       remaining: 6.5,
     });
@@ -872,31 +1058,33 @@ export function useGadget(state: GameEngineState, type: GadgetType) {
       id: `smoke-${Date.now()}`,
       x: state.player.x,
       y: state.player.y - 30,
-      text: 'NANITE SMOKE DEPLOYED',
+      text: 'NANITE SMOKE DEPLOYED (BLINDING GUARDS)',
       color: '#cbd5e1',
       alpha: 1.0,
-      life: 1.2,
+      life: 1.5,
     });
     return true;
   }
 
-  if (type === 'decoy') {
-    sound.playDecoy();
-    triggerHaptic([25, 25]);
-    state.decoys.push({
+  if (type === 'mine') {
+    sound.playMinePlant();
+    triggerHaptic([30, 25]);
+    state.mines.push({
+      id: `mine-${Date.now()}`,
       x: state.player.x,
       y: state.player.y,
-      remaining: 8.0,
+      radius: 140,
+      armed: true,
       pulseTimer: 0,
     });
     state.floatingTexts.push({
-      id: `decoy-${Date.now()}`,
+      id: `mine-arm-${Date.now()}`,
       x: state.player.x,
       y: state.player.y - 30,
-      text: 'HOLO-DECOY ACTIVE',
-      color: '#06b6d4',
+      text: 'REMOTE MINE ARMED (PRESS DETONATE)',
+      color: '#fbbf24',
       alpha: 1.0,
-      life: 1.2,
+      life: 1.8,
     });
     return true;
   }

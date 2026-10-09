@@ -508,7 +508,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engineState, stats, onTa
         });
       }
 
-      // 8. Decoys
+      // 8. Decoys and Remote Mines
       engineState.decoys.forEach((decoy) => {
         ctx.save();
         const pulse = 1 + Math.sin(Date.now() * 0.01) * 0.3;
@@ -522,6 +522,70 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engineState, stats, onTa
         ctx.beginPath();
         ctx.arc(decoy.x, decoy.y, 8, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+      });
+
+      // Render Remote Mines
+      engineState.mines.forEach((mine) => {
+        ctx.save();
+        // Blast radius indicator
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.25)';
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(mine.x, mine.y, mine.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Mine Body
+        ctx.fillStyle = '#1e1b4b';
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(mine.x, mine.y, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Flashing Detonation LED
+        const isBlink = Math.sin(Date.now() * 0.012) > 0;
+        ctx.fillStyle = isBlink ? '#ef4444' : '#450a0a';
+        ctx.beginPath();
+        ctx.arc(mine.x, mine.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('MINE', mine.x, mine.y - 18);
+        ctx.restore();
+      });
+
+      // Render Environmental Switches
+      (engineState.switches || []).forEach((sw) => {
+        ctx.save();
+        ctx.translate(sw.x, sw.y);
+
+        // Switch Console Body
+        ctx.fillStyle = '#0f172a';
+        ctx.strokeStyle = sw.isOn ? '#ef4444' : '#10b981';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, sw.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Status Indicator Core
+        ctx.fillStyle = sw.isOn ? '#ef4444' : '#10b981';
+        ctx.beginPath();
+        ctx.arc(0, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Label above switch
+        ctx.fillStyle = sw.isOn ? '#fca5a5' : '#86efac';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(sw.isOn ? '⚡ LASER ACTIVE' : '✓ LASER OFF', 0, -sw.radius - 8);
+
         ctx.restore();
       });
 

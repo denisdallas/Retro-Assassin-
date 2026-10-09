@@ -26,6 +26,7 @@ export interface LaserTrap {
   activeDuration: number; // in seconds
   timer: number;
   terminalId?: string; // can be disabled by terminal
+  switchId?: string; // can be toggled by environmental switch
   moving?: boolean;
   moveAxis?: 'x' | 'y';
   moveRange?: number;
@@ -34,6 +35,26 @@ export interface LaserTrap {
   initialY1?: number;
   initialX2?: number;
   initialY2?: number;
+}
+
+export interface EnvironmentalSwitch {
+  id: string;
+  x: number;
+  y: number;
+  radius: number;
+  targetLaserId: string;
+  isOn: boolean;
+  label: string;
+  controllableByGuard?: boolean;
+}
+
+export interface RemoteMine {
+  id: string;
+  x: number;
+  y: number;
+  radius: number; // blast radius
+  armed: boolean;
+  pulseTimer: number;
 }
 
 export interface Terminal {
@@ -88,7 +109,7 @@ export interface BossEntity extends Guard {
   warningAreas: { x: number; y: number; radius: number; timer: number; maxTimer: number }[];
 }
 
-export type GadgetType = 'smoke' | 'decoy' | 'emp' | 'camo';
+export type GadgetType = 'smoke' | 'mine' | 'emp' | 'camo';
 
 export interface GadgetItem {
   type: GadgetType;
@@ -152,6 +173,7 @@ export interface LevelData {
   guards: Guard[];
   boss?: BossEntity;
   lasers: LaserTrap[];
+  switches?: EnvironmentalSwitch[];
   terminals: Terminal[];
   vents: HiddenVent[];
   parTime: number; // Seconds for speed run challenge
@@ -207,5 +229,7 @@ export interface PlayerStats {
     endlessBestSector: number;
     endlessBestKills: number;
     highestCombo: number;
+    endlessHighScore: number;
+    endlessBestDuration: number;
   };
 }

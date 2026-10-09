@@ -114,19 +114,40 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
 
-        {/* Right: Mission Timer & Par */}
-        <div className="px-2 py-1 rounded bg-gray-900/80 border border-gray-800 text-gray-300 flex items-center gap-1">
-          <span>TIME:</span>
-          <span
-            className={`font-bold ${
-              engineState.timeElapsed > level.parTime ? 'text-amber-400' : 'text-cyan-400'
-            }`}
-          >
-            {formatTime(engineState.timeElapsed)}
-          </span>
-          <span className="text-gray-500 text-[10px]">/ {level.parTime}s</span>
-        </div>
+        {/* Right: Mission Timer & Par OR Endless Score */}
+        {isEndless ? (
+          <div className="flex items-center gap-2">
+            <div className="px-2 py-1 rounded bg-fuchsia-950/80 border border-fuchsia-500/40 text-fuchsia-300 flex items-center gap-1 font-bold">
+              <span>SCORE:</span>
+              <span className="text-white">{engineState.score}</span>
+            </div>
+            <div className="px-2 py-1 rounded bg-gray-900/80 border border-gray-800 text-cyan-300 flex items-center gap-1">
+              <span>SURVIVAL:</span>
+              <span className="font-bold">{formatTime(engineState.survivalDuration)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="px-2 py-1 rounded bg-gray-900/80 border border-gray-800 text-gray-300 flex items-center gap-1">
+            <span>TIME:</span>
+            <span
+              className={`font-bold ${
+                engineState.timeElapsed > level.parTime ? 'text-amber-400' : 'text-cyan-400'
+              }`}
+            >
+              {formatTime(engineState.timeElapsed)}
+            </span>
+            <span className="text-gray-500 text-[10px]">/ {level.parTime}s</span>
+          </div>
+        )}
       </div>
+
+      {/* Armed Mine Banner Alert */}
+      {engineState.mines.length > 0 && (
+        <div className="mx-auto px-3 py-1 rounded-full bg-rose-950/90 border border-rose-500 text-rose-300 font-mono text-[11px] font-bold flex items-center gap-1.5 shadow-lg shadow-rose-950/60 animate-pulse">
+          <span>💣</span>
+          <span>REMOTE MINE ARMED ON FIELD — TAP DETONATE TO TRIGGER BLAST</span>
+        </div>
+      )}
 
       {/* Boss Health Bar (Only if Boss is present and alive) */}
       {engineState.boss && engineState.boss.state !== 'dead' && (
